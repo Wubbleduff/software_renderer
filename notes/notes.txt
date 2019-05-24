@@ -7,3 +7,11 @@ Points I'm learning:
   derived from the math equations
 
 - Debugging linear transformations in code using pencil and paper
+
+
+5/24/2019
+I began implementation of clipping. I'm implementing clipping in clip space
+using homogeneous coordinates to make things simple and efficient. Today I was
+able to clip the left side of a triangle by detecting collisions with the left
+side of the frustum and generating geometry and topology information to draw
+two triangles that are on screen.
