@@ -1,0 +1,9 @@
+
+Points I'm learning:
+- Trying a different naming convention for simplicity and forcing myself to be
+  flexible
+
+- Solidifying my knowledge of rendering triangles using incremental changes
+  derived from the math equations
+
+- Debugging linear transformations in code using pencil and paper
