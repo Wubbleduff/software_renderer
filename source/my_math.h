@@ -6,6 +6,7 @@
 
 #define PI 3.14159265f
 #define squared(a) (a * a)
+#define deg_to_rad(a) (a * (PI / 180.0f));
 
 ///////////////////////////////////////////////////////////////////////////////
 // vector structs
