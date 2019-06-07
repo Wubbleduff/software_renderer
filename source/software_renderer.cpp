@@ -89,6 +89,16 @@ struct EdgeEquation
   bool tl;
 };
 
+enum ClipPlane
+{
+  LEFT_CLIP_PLANE,
+  RIGHT_CLIP_PLANE,
+  BOTTOM_CLIP_PLANE,
+  TOP_CLIP_PLANE,
+  NEAR_CLIP_PLANE,
+  FAR_CLIP_PLANE
+};
+
 static RendererData renderer_data;
 static bool button_states[512];
 
@@ -298,7 +308,7 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
           f32 intensity = (a * intensity0) + (b * intensity1) + (c * intensity2);
           intensity = clamp(intensity, 0.0f, 1.0f);
 
-#if 1
+#if 0
           color.r *= squared(intensity * depth);
           color.g *= squared(intensity * depth);
           color.b *= squared(intensity * depth);
@@ -342,6 +352,90 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
     a += a_inc_y;
     b += b_inc_y;
     c += c_inc_y;
+  }
+}
+
+static void clip_polygon(u32 num_in_points, v4 *in_points, u32 *num_out_points, v4 *out_points, ClipPlane plane)
+{
+  v4 plane_equation;
+
+  for(s32 i = 0; i < num_in_points; i++)
+  {
+    v4 first = in_points[i];
+    v4 second = in_points[(i + 1) % num_in_points];
+
+    switch(plane)
+    {
+      case LEFT_CLIP_PLANE:
+      {
+        plane_equation = v4(-1.0f, 0.0f, 0.0f, -1.0f);
+        break;
+      }
+
+      case RIGHT_CLIP_PLANE:
+      {
+        plane_equation = v4(1.0f, 0.0f, 0.0f, -1.0f);
+        break;
+      }
+
+      case BOTTOM_CLIP_PLANE:
+      {
+        plane_equation = v4(0.0f, -1.0f, 0.0f, -1.0f);
+        break;
+      }
+
+      case TOP_CLIP_PLANE:
+      {
+        plane_equation = v4(0.0f, 1.0f, 0.0f, -1.0f);
+        break;
+      }
+
+      case NEAR_CLIP_PLANE:
+      {
+        plane_equation = v4(0.0f, 0.0f, -1.0f, -1.0f);
+        break;
+      }
+
+      case FAR_CLIP_PLANE:
+      {
+        plane_equation = v4(0.0f, 0.0f, 0.0f, -1.0f);
+        break;
+      }
+    }
+
+    f32 first_eval = dot(plane_equation, first);
+    f32 second_eval = dot(plane_equation, second);
+    bool first_outside = 0;
+    bool second_outside = 0;
+
+    if(first_eval > 0) first_outside = true;
+    if(second_eval > 0) second_outside = true;
+
+    // Add the first point if inside
+    if(!first_outside)
+    {
+      out_points[*num_out_points] = first;
+      (*num_out_points)++;
+    }
+
+    // Trivial rejection or acceptance
+    if(!(first_outside ^ second_outside)) continue;
+
+
+    f32 dist_first_to_plane = first_eval;
+    f32 dist_first_to_second = first_eval - second_eval;
+    f32 dist = dist_first_to_plane / dist_first_to_second;
+
+    v4 clipped_point = first + dist * (second - first);
+    clipped_point -= plane_equation * 0.001f * absf(dist_first_to_second);
+
+    if(absf(clipped_point.x) > absf(clipped_point.w))
+    {
+      int b = 0;
+    }
+
+    out_points[*num_out_points] = clipped_point;
+    (*num_out_points)++;
   }
 }
 
@@ -520,7 +614,7 @@ void init_renderer()
   renderer_data.camera_position = v3(0.0f, 0.0f, 5.0f);
   renderer_data.camera_width = 60.0f;
   renderer_data.proj_type = true;
-  renderer_data.near_plane = 0.1f;
+  renderer_data.near_plane = 1.0f;
   renderer_data.far_plane = 10.0f;
 
 #if 0
@@ -528,8 +622,8 @@ void init_renderer()
   normalize_mesh(&renderer_data.model->vertices);
 #else
   v3 p0 = {-1.0f, -1.0f, 0.0f};
-  v3 p1 = { 1.0f, -1.0f, 0.0f};
-  v3 p2 = { 1.0f,  1.0f, 0.0f};
+  v3 p1 = { 1.0f, -1.0f, -1.0f};
+  v3 p2 = { 1.0f,  1.0f, -2.0f};
   //v3 p3 = {-1.0f,  1.0f, 0.0f};
   renderer_data.model->vertices.push_back(p0);
   renderer_data.model->vertices.push_back(p1);
@@ -642,12 +736,14 @@ void render()
   
   // Clipping
 #if 1
+  // For each triangle
   for(u32 triangle_index = 0; triangle_index < renderer_data.index_buffer.size(); )
   {
     u32 p0_index = renderer_data.index_buffer[triangle_index++];
     u32 p1_index = renderer_data.index_buffer[triangle_index++];
     u32 p2_index = renderer_data.index_buffer[triangle_index++];
 
+    // The three original triangle points
     v4 points[3] =
     {
       renderer_data.vertex_buffer[p0_index],
@@ -655,8 +751,8 @@ void render()
       renderer_data.vertex_buffer[p2_index],
     };
 
+#if 0
     u8 point_grid_positions[3];
-
     // Bit position x
     // 0 == inside
     // 1 == outside
@@ -672,135 +768,53 @@ void render()
 
       point_grid_positions[i] = inside_test;
     }
+#endif
 
-    v4 final_points[6] = {};
-    s32 num_final_points = 0;
+    v4 a_points[6] = {};
+    u32 num_a_points = 0;
 
-    for(u32 point_index = 0; point_index < 3; point_index++)
+    v4 b_points[6] = {};
+    u32 num_b_points = 0;
+
+    // Clip against each plane
+    a_points[0] = points[0];
+    a_points[1] = points[1];
+    a_points[2] = points[2];
+    num_a_points = 3;
+
+
+    clip_polygon(num_a_points, a_points, &num_b_points, b_points, LEFT_CLIP_PLANE);
+
+    num_a_points = 0;
+    clip_polygon(num_b_points, b_points, &num_a_points, a_points, RIGHT_CLIP_PLANE);
+
+    num_b_points = 0;
+    clip_polygon(num_a_points, a_points, &num_b_points, b_points, BOTTOM_CLIP_PLANE);
+
+    num_a_points = 0;
+    clip_polygon(num_b_points, b_points, &num_a_points, a_points, TOP_CLIP_PLANE);
+
+    num_b_points = 0;
+    clip_polygon(num_a_points, a_points, &num_b_points, b_points, NEAR_CLIP_PLANE);
+
+    num_a_points = 0;
+    clip_polygon(num_b_points, b_points, &num_a_points, a_points, FAR_CLIP_PLANE);
+
+
+
+    if(num_a_points)
     {
-      u8 first_grid_pos = point_grid_positions[point_index];
-      u8 second_grid_pos = point_grid_positions[(point_index + 1) % 3];
-      u8 checking_code = first_grid_pos ^ second_grid_pos;
-
-      const v4 *first_point = &points[point_index];
-      const v4 *second_point = &points[(point_index + 1) % 3];
-
-
-      if(point_index == 0)
+      for(s32 i = 0; i < num_a_points; i++)
       {
-        if(point_grid_positions[0] == 0)
-        {
-          final_points[num_final_points] = *first_point;
-          num_final_points++;
-        }
+        renderer_data.clipped_vertex_buffer.push_back(a_points[i]);
       }
-      if(point_index == 1)
+      u32 start_index = triangle_index - 3;
+      for(s32 i = 1; i < num_a_points - 1; i++)
       {
-        if(point_grid_positions[1] == 0)
-        {
-          final_points[num_final_points] = *first_point;
-          num_final_points++;
-        }
+        renderer_data.clipped_index_buffer.push_back(start_index);
+        renderer_data.clipped_index_buffer.push_back(start_index + i);
+        renderer_data.clipped_index_buffer.push_back(start_index + i + 1);
       }
-      if(point_index == 2)
-      {
-        if(point_grid_positions[2] == 0)
-        {
-          final_points[num_final_points] = *first_point;
-          num_final_points++;
-        }
-      }
-
-      f32 first_point_pos;
-      f32 second_point_pos;
-      f32 side_pos;
-
-      v4 clipped_points[2];
-      float dists[2];
-      u32 num_clipped_points = 0;
-      while(checking_code)
-      {
-        u8 resolved_side = 0;
-
-        // Left
-        if(checking_code & (1 << 0))
-        {
-          first_point_pos = first_point->x;
-          second_point_pos = second_point->x;
-          side_pos = -first_point->w;
-          resolved_side = (1 << 0);
-        }
-        // Right
-        if(checking_code & (1 << 1))
-        {
-          first_point_pos = first_point->x;
-          second_point_pos = second_point->x;
-          side_pos = first_point->w;
-          resolved_side = (1 << 1);
-        }
-        // Bottom
-        if(checking_code & (1 << 2))
-        {
-          first_point_pos = first_point->y;
-          second_point_pos = second_point->y;
-          side_pos = -first_point->w;
-          resolved_side = (1 << 2);
-        }
-        // Top
-        if(checking_code & (1 << 3))
-        {
-          first_point_pos = first_point->y;
-          second_point_pos = second_point->y;
-          side_pos = first_point->w;
-          resolved_side = (1 << 3);
-        }
-
-        f32 dist = ((side_pos * 0.999f) - first_point_pos) / (second_point_pos - first_point_pos);
-        v4 clipped_point = *first_point + (*second_point - *first_point) * dist;
-
-        clipped_points[num_clipped_points] = clipped_point;
-        dists[num_clipped_points] = dist;
-        num_clipped_points++;
-
-        u8 mask = ~resolved_side;
-        checking_code = checking_code & mask;
-      }
-
-      if(num_clipped_points == 1)
-      {
-        final_points[num_final_points++] = clipped_points[0];
-      }
-      if(num_clipped_points == 2)
-      {
-        if(dists[0] < dists[1])
-        {
-          final_points[num_final_points++] = clipped_points[0];
-          final_points[num_final_points++] = clipped_points[1];
-        }
-        else
-        {
-          final_points[num_final_points++] = clipped_points[1];
-          final_points[num_final_points++] = clipped_points[0];
-        }
-      }
-    }
-
-    if(num_final_points == 0)
-    {
-      int b = 0;
-    }
-
-    for(s32 i = 0; i < num_final_points; i++)
-    {
-      renderer_data.clipped_vertex_buffer.push_back(final_points[i]);
-    }
-    // Push first point and build a triangle fan with new points
-    s32 start_index = triangle_index - 3;
-    for(s32 i = 1; i < num_final_points - 1; i++)
-    {
-      renderer_data.clipped_index_buffer.push_back(start_index);
-      renderer_data.clipped_index_buffer.push_back(start_index + i);
-      renderer_data.clipped_index_buffer.push_back(start_index + i + 1);
     }
   }
 #else
@@ -948,6 +962,7 @@ void poll_events()
 
 
 
+#if 1
   if(button_states['I'])
   {
     renderer_data.model->scale.x -= speed;
@@ -958,7 +973,18 @@ void poll_events()
     renderer_data.model->scale.x += speed;
     renderer_data.model->scale.y += speed;
   }
-
+#else
+  if(button_states['I'])
+  {
+    renderer_data.near_plane += 0.01f;
+    printf("Near: %f\n", renderer_data.near_plane);
+  }
+  if(button_states['K'])
+  {
+    renderer_data.near_plane -= 0.01f;
+    printf("Near: %f\n", renderer_data.near_plane);
+  }
+#endif
 
   if(button_states['J'])
   {
