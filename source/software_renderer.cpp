@@ -1,12 +1,8 @@
 #include "software_renderer.h"
 #include "my_math.h"
 #include "asset_loading.h"
+#include "input.h"
 
-#include "..\lib\glew-2.1.0\include\GL\glew.h"
-#include "..\lib\glfw-3.2.1.bin.WIN32\include\GLFW\glfw3.h"
-
-#include <stdlib.h> // exit
-#include <stdio.h>  // printf
 #include <assert.h> // assert
 #include <vector>
 
@@ -19,6 +15,7 @@ struct Model
 
   std::vector<v3> vertices;
   std::vector<u32> vertex_indices;
+  std::vector<v3> normals;
 };
 
 struct PixelInfo
@@ -27,7 +24,7 @@ struct PixelInfo
 
 struct RendererData
 {
-  GLFWwindow *window;
+  u32 *frame_buffer;
   u32 screen_width;
   u32 screen_height;
   u32 num_pixels;
@@ -38,10 +35,6 @@ struct RendererData
   bool proj_type; // false is ortho, true is perspective
   f32 near_plane;
   f32 far_plane;
-
-  GLuint pboid; // Framebuffer
-  GLuint vaoid;
-  GLuint texid;
 
   f32 *depth_buffer;
   PixelInfo *pixel_info_buffer;
@@ -78,7 +71,8 @@ struct Color
     u32 blue = (u32)(b * 255.0f);
     u32 alpha = (u32)(a * 255.0f);
 
-    u32 result = (red << 0) | (green << 8) | (blue << 16) | (alpha << 24);
+    //u32 result = (red << 0) | (green << 8) | (blue << 16) | (alpha << 24);
+    u32 result = (blue << 0) | (green << 8) | (red << 16) | (alpha << 24);
     return result;
   }
 };
@@ -100,53 +94,8 @@ enum ClipPlane
 };
 
 static RendererData renderer_data;
-static bool button_states[512];
 
 
-
-
-static void resize_callback(GLFWwindow *window, s32 width, s32 height)
-{
-  glViewport(0, 0, width, height);
-  renderer_data.screen_width = width;
-  renderer_data.screen_height = height;
-  renderer_data.num_pixels = width * height;
-  renderer_data.aspect_ratio = (f32)width / (f32)height;
-}
-
-static void key_callback(GLFWwindow *window, s32 key, s32 scan_code, s32 action, s32 mod)
-{
-  // Keyboard input
-  if(action == GLFW_PRESS)
-  {
-    if(key == GLFW_KEY_ESCAPE) exit(0);
-
-    button_states[key] = true;
-  }
-  else if(action == GLFW_REPEAT)
-  {
-  }
-  else if(action == GLFW_RELEASE)
-  {
-    button_states[key] = false;
-  }
-}
-
-static void mousebutton_callback(GLFWwindow *window, s32 button, s32 action, s32 mod)
-{
-  // Mouse button input
-  if(action == GLFW_PRESS)
-  {
-    button_states[GLFW_MOUSE_BUTTON_LEFT] = true;
-  }
-  else if(action == GLFW_REPEAT)
-  {
-  }
-  else if(action == GLFW_RELEASE)
-  {
-    button_states[GLFW_MOUSE_BUTTON_LEFT] = false;
-  }
-}
 
 
 
@@ -167,6 +116,138 @@ static void print_pixel_info(u32 x, u32 y)
   PixelInfo *pixel = &renderer_data.pixel_info_buffer[y * renderer_data.screen_width + x];
 
   printf("\n\n");
+}
+
+static void update_stuff()
+{
+  float speed = 0.025f;
+  if(button_state('W'))
+  {
+    renderer_data.model->position.y += speed;
+  }
+  if(button_state('S'))
+  {
+    renderer_data.model->position.y -= speed;
+  }
+  if(button_state('A'))
+  {
+    renderer_data.model->position.x -= speed;
+  }
+  if(button_state('D'))
+  {
+    renderer_data.model->position.x += speed;
+  }
+
+
+
+#if 1
+  if(button_state('I'))
+  {
+    renderer_data.model->scale.x -= speed;
+    renderer_data.model->scale.y -= speed;
+  }
+  if(button_state('K'))
+  {
+    renderer_data.model->scale.x += speed;
+    renderer_data.model->scale.y += speed;
+  }
+#else
+  if(button_state('I'))
+  {
+    renderer_data.near_plane += 0.01f;
+    printf("Near: %f\n", renderer_data.near_plane);
+  }
+  if(button_state('K'))
+  {
+    renderer_data.near_plane -= 0.01f;
+    printf("Near: %f\n", renderer_data.near_plane);
+  }
+#endif
+
+  if(button_state('J'))
+  {
+    renderer_data.model->rotation += speed;
+  }
+  if(button_state('L'))
+  {
+    renderer_data.model->rotation -= speed;
+  }
+
+  if(button_state('Z'))
+  {
+    renderer_data.camera_width -= 0.1f;
+  }
+  if(button_state('X'))
+  {
+    renderer_data.camera_width += 0.1f;
+  }
+
+  renderer_data.proj_type = true;
+  if(button_state(' '))
+  {
+    renderer_data.proj_type = false;
+  }
+
+#if 0
+  static bool left_pressed = false;
+  if(button_state(GLFW_MOUSE_BUTTON_LEFT) && !left_pressed)
+  {
+    printf("mouse_x, mouse_y: (%f, %f\n", mouse_x, mouse_y);
+    print_pixel_info((u32)mouse_x, (u32)mouse_y);
+  }
+  left_pressed = button_state(GLFW_MOUSE_BUTTON_LEFT);
+#endif
+}
+
+// Computes the per vertex normals for a given mesh
+static void compute_vertex_normals(const std::vector<v3> *in_vertices, const std::vector<u32> *in_indices, std::vector<v3> *out_normals)
+{
+  const std::vector<v3> &vertices = *in_vertices;
+  const std::vector<unsigned> &indices = *in_indices;
+
+  if(vertices.size() == 0) return;
+
+  // Allocate buffers
+  std::vector<v3> &normals = *out_normals;
+  normals.reserve(vertices.size());
+  normals.resize(vertices.size());
+
+  std::vector<unsigned> sums;
+  sums.reserve(vertices.size());
+  sums.resize(vertices.size());
+
+  // Initalize to zero
+  for(unsigned i = 0; i < normals.size(); i++) normals[i] = v3(0.0f, 0.0f, 0.0f);
+  for(unsigned i = 0; i < sums.size(); i++) sums[i] = 0;
+
+  // Find the sum of all normals per vertex
+  for(unsigned i = 0; i < indices.size(); )
+  {
+    unsigned p0_index = indices[i++];
+    unsigned p1_index = indices[i++];
+    unsigned p2_index = indices[i++];
+
+    v3 p0 = vertices[p0_index];
+    v3 p1 = vertices[p1_index];
+    v3 p2 = vertices[p2_index];
+
+    v3 normal = cross(p1 - p0, p2 - p0);
+    normal = unit(normal);
+
+    normals[p0_index] += normal;
+    normals[p1_index] += normal;
+    normals[p2_index] += normal;
+
+    sums[p0_index]++;
+    sums[p1_index]++;
+    sums[p2_index]++;
+  }
+
+  // Divide to find average normal per vertex
+  for(unsigned i = 0; i < normals.size(); i++)
+  {
+    normals[i] /= (float)sums[i];
+  }
 }
 
 // Render a triangle in viewport pixel space between points p0, p1, p2 with the given color (depending on the render mode)
@@ -291,9 +372,10 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
           f32 intensity1 = 1.0f;
           f32 intensity2 = 1.0f;
           // Intensity is cos of the angle between the light source and the normal
-          //intensity0 = dot(normals[0], (lightPos - centroid).unit());
-          //intensity1 = dot(normals[1], (lightPos - centroid).unit());
-          //intensity2 = dot(normals[2], (lightPos - centroid).unit());
+          //v3 light_pos = v3(0.0f, 0.0f, 1.0f);
+          //intensity0 = dot(normals[0], unit(light_pos - centroid));
+          //intensity1 = dot(normals[1], unit(light_pos - centroid));
+          //intensity2 = dot(normals[2], unit(light_pos - centroid));
 
           //f32 s = (a * textureCoords[0].x) + (b * textureCoords[1].x) + (c * textureCoords[2].x);
           //f32 t = (a * textureCoords[0].y) + (b * textureCoords[1].y) + (c * textureCoords[2].y);
@@ -309,9 +391,9 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
           intensity = clamp(intensity, 0.0f, 1.0f);
 
 #if 0
-          color.r *= squared(intensity * depth);
-          color.g *= squared(intensity * depth);
-          color.b *= squared(intensity * depth);
+          color.r *= squared(intensity);
+          color.g *= squared(intensity);
+          color.b *= squared(intensity);
 #else
           color.r *= a;
           color.g *= b;
@@ -443,162 +525,18 @@ static void clip_polygon(u32 num_in_points, v4 *in_points, u32 *num_out_points, 
 
 
 
-void init_renderer()
+void init_renderer(u32 *frame_buffer, u32 width, u32 height)
 {
-  // GLFW and GLEW setup
-  bool result;
-  result = glfwInit();
-  if(!result)
-  {
-    printf("Could not intialize glfw.\n");
-    exit(1);
-    return;
-  }
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-
-  // TODO: Read in window width and height
-  renderer_data.window = glfwCreateWindow(1920, 1080, "Software Renderer", NULL, NULL);
-  if(!renderer_data.window)
-  {
-    printf("Could not make window\n");
-    glfwTerminate();
-    exit(1);
-    return;
-  }
-  glfwMakeContextCurrent(renderer_data.window);
-
-  glfwSetFramebufferSizeCallback(renderer_data.window, resize_callback);
-  glfwSetKeyCallback(renderer_data.window, key_callback);
-  glfwSetMouseButtonCallback(renderer_data.window, mousebutton_callback);
-
-  GLenum glew_result = glewInit();
-  if(glew_result != GLEW_OK)
-  {
-    printf("Could not initalize GLEW\n");
-    exit(1);
-    return;
-  }
-
-  // Use the screen width and height as viewport
-  glfwGetFramebufferSize(renderer_data.window, (int *)(&renderer_data.screen_width), (int *)(&renderer_data.screen_height));
-  resize_callback(renderer_data.window, renderer_data.screen_width, renderer_data.screen_height);
+  renderer_data.frame_buffer = frame_buffer;
+  renderer_data.screen_width = width;
+  renderer_data.screen_height = height;
+  renderer_data.num_pixels = width * height;
+  renderer_data.aspect_ratio = (f32)width / (f32)height;
 
 
 
-  // OpenGL setup
-  s32 error = 0;
-  // Create the PBO
-  u32 byte_count = renderer_data.num_pixels * sizeof(u32);
-  glCreateBuffers(1, &renderer_data.pboid);
-  glNamedBufferStorage(renderer_data.pboid, byte_count, 0, GL_DYNAMIC_STORAGE_BIT | GL_MAP_WRITE_BIT);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, renderer_data.pboid);
-
-  // Create the texture object
-  GLuint width = renderer_data.screen_width;
-  GLuint height = renderer_data.screen_height;
-  glCreateTextures(GL_TEXTURE_2D, 1, &renderer_data.texid);
-  glBindTexture(GL_TEXTURE_2D, renderer_data.texid);
-  glTextureStorage2D(renderer_data.texid, 1, GL_RGBA8, width, height);
-  glTextureSubImage2D(renderer_data.texid, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-  // VAO
-  glGenVertexArrays(1, &renderer_data.vaoid);
-  glBindVertexArray(renderer_data.vaoid);
-  GLuint vbo;
-  glGenBuffers(1, &vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  f32 vertices[] =
-  {
-    // Shape            // Texture
-    -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
-     1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
-    -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
-     1.0f,  1.0f, 0.0f, 1.0f, 1.0f,
-  };
-  // Send vertex data
-  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-  // Vertex positions
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(f32), (void *)0);
-  glEnableVertexAttribArray(0);
-  // Texture coordinates
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(f32), (void *)(sizeof(f32) * 3));
-  glEnableVertexAttribArray(1);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-  glBindVertexArray(0);
-
-
-  // Shaders
-  const GLchar *vertex_shader_source =
-  "#version 450 core\n                                " \
-  "layout (location = 0) in vec2 vVertexPosition;     " \
-  "layout (location = 1) in vec2 vVertexTexCoord;     " \
-  "out vec2 vTexCoord;                                " \
-  "void main()                                        " \
-  "{                                                  " \
-  "  gl_Position = vec4(vVertexPosition, 0.0, 1.0);   " \
-  "  vTexCoord = vVertexTexCoord;                     " \
-  "}                                                  ";
-
-  const GLchar *frag_shader_source =
-  "#version 450 core\n                      " \
-  "in vec2 vTexCoord;                       " \
-  "out vec4 fFragClr;                       " \
-  "uniform sampler2D uTex0;                 " \
-  "void main ()                             " \
-  "{                                        " \
-  "  vec4 clr = texture(uTex0, vTexCoord);  " \
-  "  fFragClr = clr;                        " \
-  "}                                        ";
-  GLint success;
-  s8 log[512];
-  GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
-  glCompileShader(vertex_shader);
-  glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-  if(!success)
-  {
-    glGetShaderInfoLog(vertex_shader, 512, NULL, log);
-    printf("Could not compile vertex shader\n\n");
-    printf(log);
-  }
-  GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(frag_shader, 1, &frag_shader_source, NULL);
-  glCompileShader(frag_shader);
-  glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &success);
-  if(!success)
-  {
-    glGetShaderInfoLog(frag_shader, 512, NULL, log);
-    printf("Could not compile fragment shader\n\n");
-    printf(log);
-  }
-  GLuint new_program = glCreateProgram();
-  glAttachShader(new_program, vertex_shader);
-  glAttachShader(new_program, frag_shader);
-  glLinkProgram(new_program);
-  GLint link_status;
-  glGetProgramiv(new_program, GL_LINK_STATUS, &link_status);
-  if(!success)
-  {
-    glGetShaderInfoLog(new_program, 512, NULL, log);
-    printf("Could not link shaders\n\n");
-    printf(log);
-  }
-
-  glUseProgram(new_program);
-
-
-
-
-  // My setup
-  renderer_data.clear_color = Color(0.0f, 0.0f, 0.0f, 1.0f).pack();
-  clear_framebuffer();
+  renderer_data.clear_color = Color(0.0f, 0.0f, 0.0f, 0.0f).pack();
+  clear_frame_buffer();
 
   u32 size = renderer_data.num_pixels;
   renderer_data.depth_buffer = new f32[size];
@@ -617,24 +555,25 @@ void init_renderer()
   renderer_data.near_plane = 1.0f;
   renderer_data.far_plane = 10.0f;
 
-#if 0
+#if 1
   load_obj("meshes/head.obj", &renderer_data.model->vertices, 0, 0, &renderer_data.model->vertex_indices);
   normalize_mesh(&renderer_data.model->vertices);
+  compute_vertex_normals(&renderer_data.model->vertices, &renderer_data.model->vertex_indices, &renderer_data.model->normals);
 #else
   v3 p0 = {-1.0f, -1.0f, 0.0f};
-  v3 p1 = { 1.0f, -1.0f, -1.0f};
-  v3 p2 = { 1.0f,  1.0f, -2.0f};
-  //v3 p3 = {-1.0f,  1.0f, 0.0f};
+  v3 p1 = { 1.0f, -1.0f, 0.0f};
+  v3 p2 = { 1.0f,  1.0f, 0.0f};
+  v3 p3 = {-1.0f,  1.0f, 0.0f};
   renderer_data.model->vertices.push_back(p0);
   renderer_data.model->vertices.push_back(p1);
   renderer_data.model->vertices.push_back(p2);
-  //renderer_data.model->vertices.push_back(p3);
+  renderer_data.model->vertices.push_back(p3);
   renderer_data.model->vertex_indices.push_back(0);
   renderer_data.model->vertex_indices.push_back(1);
   renderer_data.model->vertex_indices.push_back(2);
-  //renderer_data.model->vertex_indices.push_back(2);
-  //renderer_data.model->vertex_indices.push_back(3);
-  //renderer_data.model->vertex_indices.push_back(0);
+  renderer_data.model->vertex_indices.push_back(2);
+  renderer_data.model->vertex_indices.push_back(3);
+  renderer_data.model->vertex_indices.push_back(0);
 #endif
 }
 
@@ -644,9 +583,7 @@ void render()
   u32 screen_width = renderer_data.screen_width;
   u32 screen_height = renderer_data.screen_height;
 
-  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
-  clear_framebuffer();
+  clear_frame_buffer();
   // Clear depth buffer
   for(u32 i = 0; i < renderer_data.num_pixels; i++) renderer_data.depth_buffer[i] = 1.0f;
 
@@ -808,7 +745,7 @@ void render()
       {
         renderer_data.clipped_vertex_buffer.push_back(a_points[i]);
       }
-      u32 start_index = triangle_index - 3;
+      u32 start_index = renderer_data.clipped_vertex_buffer.size() - num_a_points;
       for(s32 i = 1; i < num_a_points - 1; i++)
       {
         renderer_data.clipped_index_buffer.push_back(start_index);
@@ -882,7 +819,7 @@ void render()
 
 
   // Rasterize triangles in buffers
-  u32 *pixels = (u32 *)glMapNamedBuffer(renderer_data.pboid, GL_WRITE_ONLY);
+  u32 *pixels = renderer_data.frame_buffer;
 
 
   const std::vector<v4> &vertices = renderer_data.clipped_vertex_buffer;
@@ -890,136 +827,45 @@ void render()
   for(u32 i = 0; i < indices.size(); )
   {
     v3 v[3];
+    //v3 n[3];
 
     u32 index = indices[i++];
     v3 vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
     v[0] = vertex;
+    //n[0] = renderer_data.model->normals[index];
 
     index = indices[i++];
     vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
     v[1] = vertex;
+    //n[1] = renderer_data.model->normals[index];
 
     index = indices[i++];
     vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
     v[2] = vertex;
+    //n[2] = renderer_data.model->normals[index];
+
 
 
     render_triangle(pixels, v[0], v[1], v[2], 0, 0, v3());
   }
 
 
-  glUnmapNamedBuffer(renderer_data.pboid);
-
-  // Send the texture data
-  glTextureSubImage2D(renderer_data.texid, 0, 0, 0, screen_width, screen_height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-
-  glBindVertexArray(renderer_data.vaoid);
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  glBindVertexArray(0);
+  update_stuff();
 }
 
 // glClear
-void clear_framebuffer()
+void clear_frame_buffer()
 {
-  u32 *pixels = (u32 *)glMapNamedBuffer(renderer_data.pboid, GL_WRITE_ONLY);
+  u32 *pixels = renderer_data.frame_buffer;
 
   for(u32 i = 0; i < renderer_data.num_pixels; i++)
   {
     pixels[i] = renderer_data.clear_color;
   }
-
-  glUnmapNamedBuffer(renderer_data.pboid);
 }
 
 void swap_buffers()
 {
-  glfwSwapBuffers(renderer_data.window);
 }
 
-void poll_events()
-{
-  glfwPollEvents();
-
-  if(glfwWindowShouldClose(renderer_data.window)) exit(0);
-
-  float speed = 0.025f;
-  if(button_states['W'])
-  {
-    renderer_data.model->position.y += speed;
-  }
-  if(button_states['S'])
-  {
-    renderer_data.model->position.y -= speed;
-  }
-  if(button_states['A'])
-  {
-    renderer_data.model->position.x -= speed;
-  }
-  if(button_states['D'])
-  {
-    renderer_data.model->position.x += speed;
-  }
-
-
-
-#if 1
-  if(button_states['I'])
-  {
-    renderer_data.model->scale.x -= speed;
-    renderer_data.model->scale.y -= speed;
-  }
-  if(button_states['K'])
-  {
-    renderer_data.model->scale.x += speed;
-    renderer_data.model->scale.y += speed;
-  }
-#else
-  if(button_states['I'])
-  {
-    renderer_data.near_plane += 0.01f;
-    printf("Near: %f\n", renderer_data.near_plane);
-  }
-  if(button_states['K'])
-  {
-    renderer_data.near_plane -= 0.01f;
-    printf("Near: %f\n", renderer_data.near_plane);
-  }
-#endif
-
-  if(button_states['J'])
-  {
-    renderer_data.model->rotation += speed;
-  }
-  if(button_states['L'])
-  {
-    renderer_data.model->rotation -= speed;
-  }
-
-  if(button_states['Z'])
-  {
-    renderer_data.camera_width -= 0.1f;
-  }
-  if(button_states['X'])
-  {
-    renderer_data.camera_width += 0.1f;
-  }
-
-  renderer_data.proj_type = true;
-  if(button_states[' '])
-  {
-    renderer_data.proj_type = false;
-  }
-
-  double mouse_x, mouse_y;
-  glfwGetCursorPos(renderer_data.window, &mouse_x, &mouse_y);
-  mouse_y = -mouse_y + renderer_data.screen_height;
-
-  static bool left_pressed = false;
-  if(button_states[GLFW_MOUSE_BUTTON_LEFT] && !left_pressed)
-  {
-    printf("mouse_x, mouse_y: (%f, %f\n", mouse_x, mouse_y);
-    print_pixel_info((u32)mouse_x, (u32)mouse_y);
-  }
-  left_pressed = button_states[GLFW_MOUSE_BUTTON_LEFT];
-}
 

@@ -1,1 +1,1 @@
-cl /Zl /EHsc /O2 source\main.cpp source\software_renderer.cpp source\asset_loading.cpp kernel32.lib user32.lib gdi32.lib shell32.lib opengl32.lib lib\glew-2.1.0\lib\Release\Win32\glew32.lib lib\glfw-3.2.1.bin.WIN32\lib-vc2015\glfw3.lib
+cl /EHsc /O2 kernel32.lib user32.lib gdi32.lib shell32.lib source\main.cpp source\software_renderer.cpp source\asset_loading.cpp

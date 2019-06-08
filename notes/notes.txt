@@ -16,6 +16,8 @@ Points I'm learning:
   corner cases in clipping, it was simpler to independently clip against 6
   planes for each triangle.
 
+- Swtiched from using OpenGL to Windows for access to a frame buffer.
+
 
 5/24/2019
 I began implementation of clipping. I'm implementing clipping in clip space
