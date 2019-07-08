@@ -1,0 +1,21 @@
+0: main loop
+  average time: 139.111115 ms
+
+1: vertex transformation
+  average time: 0.012346 ms
+
+2: clipping
+  average time: 0.407407 ms
+
+3: perspective division
+  average time: 0.000000 ms
+
+4: viewport transform
+  average time: 0.061728 ms
+
+5: draw all triangles
+  average time: 72.728394 ms
+
+6: rasterize triangle
+  average time: 0.028656 ms
+

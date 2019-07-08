@@ -122,13 +122,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="source\asset_loading.cpp" />
+    <ClCompile Include="source\logging.cpp" />
     <ClCompile Include="source\main.cpp" />
+    <ClCompile Include="source\profiling.cpp" />
     <ClCompile Include="source\software_renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="source\asset_loading.h" />
+    <ClInclude Include="source\logging.h" />
     <ClInclude Include="source\my_math.h" />
+    <ClInclude Include="source\profiling.h" />
     <ClInclude Include="source\software_renderer.h" />
+    <ClInclude Include="source\types.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

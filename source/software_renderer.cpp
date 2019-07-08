@@ -2,9 +2,45 @@
 #include "my_math.h"
 #include "asset_loading.h"
 #include "input.h"
+#include "profiling.h"
+
+#include "logging.h"
 
 #include <assert.h> // assert
 #include <vector>
+
+struct Color
+{
+  f32 r, g, b, a;
+
+  Color()
+  {
+    r = 0.0f;
+    g = 0.0f;
+    b = 0.0f;
+    a = 0.0f;
+  }
+
+  Color(f32 red, f32 green, f32 blue, f32 alpha) : r(red), g(green), b(blue), a(alpha)
+  {
+  }
+
+  Color(f32 red, f32 green, f32 blue) : r(red), g(green), b(blue), a(1.0f)
+  {
+  }
+
+  u32 pack()
+  {
+    u32 red = (u32)(r * 255.0f);
+    u32 green = (u32)(g * 255.0f);
+    u32 blue = (u32)(b * 255.0f);
+    u32 alpha = (u32)(a * 255.0f);
+
+    //u32 result = (red << 0) | (green << 8) | (blue << 16) | (alpha << 24);
+    u32 result = (blue << 0) | (green << 8) | (red << 16) | (alpha << 24);
+    return result;
+  }
+};
 
 struct Model
 {
@@ -20,6 +56,23 @@ struct Model
 
 struct PixelInfo
 {
+  u32 x;
+  u32 y;
+  Color final_color;
+  v3 triangle_vertices[3];
+};
+
+// This struct is for the vertex buffer. It will contain the vertex along with any attributes of that vertex (normal, material, UV, etc)
+struct Vertex
+{
+  v4 vertex;
+  v3 normal;
+};
+
+enum RenderMode
+{
+  RENDER_MODE_TRIANGLES,
+  RENDER_MODE_LINES
 };
 
 struct RendererData
@@ -29,6 +82,8 @@ struct RendererData
   u32 screen_height;
   u32 num_pixels;
   f32 aspect_ratio;
+
+  RenderMode mode;
 
   v3 camera_position;
   f32 camera_width;
@@ -44,37 +99,11 @@ struct RendererData
   Model *model;
 
 
-  std::vector<v4> vertex_buffer;
+  std::vector<Vertex> vertex_buffer;
   std::vector<u32> index_buffer;
 
-  std::vector<v4> clipped_vertex_buffer;
+  std::vector<Vertex> clipped_vertex_buffer;
   std::vector<u32> clipped_index_buffer;
-};
-
-struct Color
-{
-  f32 r, g, b, a;
-
-  Color(f32 red, f32 green, f32 blue, f32 alpha) : r(red), g(green), b(blue), a(alpha)
-  {
-  }
-
-  Color(f32 red, f32 green, f32 blue) : r(red), g(green), b(blue), a(1.0f)
-  {
-  }
-
-
-  u32 pack()
-  {
-    u32 red = (u32)(r * 255.0f);
-    u32 green = (u32)(g * 255.0f);
-    u32 blue = (u32)(b * 255.0f);
-    u32 alpha = (u32)(a * 255.0f);
-
-    //u32 result = (red << 0) | (green << 8) | (blue << 16) | (alpha << 24);
-    u32 result = (blue << 0) | (green << 8) | (red << 16) | (alpha << 24);
-    return result;
-  }
 };
 
 struct EdgeEquation
@@ -115,25 +144,36 @@ static void print_pixel_info(u32 x, u32 y)
 {
   PixelInfo *pixel = &renderer_data.pixel_info_buffer[y * renderer_data.screen_width + x];
 
-  printf("\n\n");
+  log_file("mouse x: %d", x);
+  log_file("mouse y: %d", y);
+  log_file("R: %f, G: %f, B: %f", pixel->final_color.r, pixel->final_color.g, pixel->final_color.b);
+  log_file("V0: (%f, %f, %f)", pixel->triangle_vertices[0].x, pixel->triangle_vertices[0].y, pixel->triangle_vertices[0].z);
+  log_file("V1: (%f, %f, %f)", pixel->triangle_vertices[1].x, pixel->triangle_vertices[1].y, pixel->triangle_vertices[1].z);
+  log_file("V2: (%f, %f, %f)", pixel->triangle_vertices[2].x, pixel->triangle_vertices[2].y, pixel->triangle_vertices[2].z);
+  log_file("model pos: %f, %f", renderer_data.model->position.x, renderer_data.model->position.y);
+  log_file("model scale: %f, %f", renderer_data.model->scale.x, renderer_data.model->scale.y);
+  log_file("model rot: %f", renderer_data.model->rotation);
+
+  log_file("\n\n");
+
 }
 
 static void update_stuff()
 {
-  float speed = 0.025f;
-  if(button_state('W'))
+  f32 speed = 0.055f;
+  if(key_state('W'))
   {
     renderer_data.model->position.y += speed;
   }
-  if(button_state('S'))
+  if(key_state('S'))
   {
     renderer_data.model->position.y -= speed;
   }
-  if(button_state('A'))
+  if(key_state('A'))
   {
     renderer_data.model->position.x -= speed;
   }
-  if(button_state('D'))
+  if(key_state('D'))
   {
     renderer_data.model->position.x += speed;
   }
@@ -141,62 +181,74 @@ static void update_stuff()
 
 
 #if 1
-  if(button_state('I'))
+  if(key_state('I'))
   {
     renderer_data.model->scale.x -= speed;
     renderer_data.model->scale.y -= speed;
   }
-  if(button_state('K'))
+  if(key_state('K'))
   {
     renderer_data.model->scale.x += speed;
     renderer_data.model->scale.y += speed;
   }
 #else
-  if(button_state('I'))
+  if(key_state('I'))
   {
     renderer_data.near_plane += 0.01f;
     printf("Near: %f\n", renderer_data.near_plane);
   }
-  if(button_state('K'))
+  if(key_state('K'))
   {
     renderer_data.near_plane -= 0.01f;
     printf("Near: %f\n", renderer_data.near_plane);
   }
 #endif
 
-  if(button_state('J'))
+  if(key_state('J'))
   {
     renderer_data.model->rotation += speed;
   }
-  if(button_state('L'))
+  if(key_state('L'))
   {
     renderer_data.model->rotation -= speed;
   }
 
-  if(button_state('Z'))
+  if(key_state('Z'))
   {
     renderer_data.camera_width -= 0.1f;
   }
-  if(button_state('X'))
+  if(key_state('X'))
   {
     renderer_data.camera_width += 0.1f;
   }
 
+#if 0
   renderer_data.proj_type = true;
-  if(button_state(' '))
+  if(key_state(' '))
   {
     renderer_data.proj_type = false;
   }
-
-#if 0
-  static bool left_pressed = false;
-  if(button_state(GLFW_MOUSE_BUTTON_LEFT) && !left_pressed)
-  {
-    printf("mouse_x, mouse_y: (%f, %f\n", mouse_x, mouse_y);
-    print_pixel_info((u32)mouse_x, (u32)mouse_y);
-  }
-  left_pressed = button_state(GLFW_MOUSE_BUTTON_LEFT);
 #endif
+
+  static bool left_click = false;
+  v2 pos = mouse_window_position();
+  pos.y -= renderer_data.screen_height;
+  pos.y *= -1.0f;
+  if(mouse_state(0) && !left_click)
+  {
+    log_file("Mouse position: %f, %f", pos.x, pos.y);
+    print_pixel_info((u32)pos.x, (u32)pos.y);
+  }
+  left_click = mouse_state(0);
+
+  if(key_state('M'))
+  {
+    renderer_data.mode = RENDER_MODE_LINES;
+  }
+  else
+  {
+    renderer_data.mode = RENDER_MODE_TRIANGLES;
+  }
 }
 
 // Computes the per vertex normals for a given mesh
@@ -246,14 +298,131 @@ static void compute_vertex_normals(const std::vector<v3> *in_vertices, const std
   // Divide to find average normal per vertex
   for(unsigned i = 0; i < normals.size(); i++)
   {
-    normals[i] /= (float)sums[i];
+    normals[i] /= (f32)sums[i];
+  }
+}
+
+void render_line_bresenham(u32 x1, u32 y1, u32 x2, u32 y2, Color color)
+{
+  assert(x1 >= 0);
+  assert(x1 < renderer_data.screen_width);
+  assert(x2 >= 0);
+  assert(x2 < renderer_data.screen_width);
+
+  assert(y1 >= 0);
+  assert(y1 < renderer_data.screen_height);
+  assert(y2 >= 0);
+  assert(y2 < renderer_data.screen_height);
+
+  s32 dx = x2 - x1; 
+  s32 dy = y2 - y1;
+
+  s32 absdx = (dx < 0) ? -dx : dx;
+  s32 absdy = (dy < 0) ? -dy : dy;
+
+  // Deal with a vertical line
+  if(dx == 0)
+  {
+    s32 y_step = (y1 < y2) ? 1 : -1;
+    while(y1 != y2)
+    {
+      renderer_data.frame_buffer[y1 * renderer_data.screen_width + x1] = color.pack();
+      y1 += y_step;
+    }
+
+    return;
+  }
+
+  renderer_data.frame_buffer[y1 * renderer_data.screen_width + x1] = color.pack();
+
+  s32 counter = 0;
+
+
+
+  // Check if slope is less than or greater than 1
+  if(absdy <= absdx)
+  {
+    // Slope <= 1
+
+    u32 start_x;
+    u32 start_y;
+    s32 y_step;
+    if(x1 < x2)
+    {
+      start_x = x1;
+      start_y = y1;
+      y_step = (y1 < y2) ? 1 : -1;
+    }
+    else
+    {
+      start_x = x2;
+      start_y = y2;
+      y_step = (y1 < y2) ? -1 : 1;
+    }
+
+    u32 current_x = start_x;
+    u32 current_y = start_y;
+
+
+    while(current_x < start_x + absdx)
+    {
+      current_x++;
+      counter += absdy;
+
+      if(counter > absdx)
+      {
+        counter -= absdx;
+        current_y += y_step;
+      }
+
+      renderer_data.frame_buffer[current_y * renderer_data.screen_width + current_x] = color.pack();
+    }
+  }
+  else
+  {
+    // Slope > 1
+
+    u32 start_x;
+    u32 start_y;
+    s32 x_step;
+    if(y1 < y2)
+    {
+      start_x = x1;
+      start_y = y1;
+      x_step = (x1 < x2) ? 1 : -1;
+    }
+    else
+    {
+      start_x = x2;
+      start_y = y2;
+      x_step = (x1 < x2) ? -1 : 1;
+    }
+
+    u32 current_x = start_x;
+    u32 current_y = start_y;
+
+
+    while(current_y < start_y + absdy)
+    {
+      current_y++;
+      counter += absdx;
+
+      if(counter > absdy)
+      {
+        counter -= absdy;
+        current_x += x_step;
+      }
+
+      renderer_data.frame_buffer[current_y * renderer_data.screen_width + current_x] = color.pack();
+    }
   }
 }
 
 // Render a triangle in viewport pixel space between points p0, p1, p2 with the given color (depending on the render mode)
 // p0, p1, p2 will only show if in counter-clockwise order
 // If there are normals and/or texture coords, there must be 3 normals and/or 3 texture coordinates given
-static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *texture_coords, v3 centroid)
+static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *texture_coords)
+#if 1
 {
   v3 crossp = cross(p1 - p0, p2 - p0);
 
@@ -281,17 +450,137 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
 
   u32 width = renderer_data.screen_width;
   u32 height = renderer_data.screen_height;
-#if 0
+
   assert(left_bb >= 0);
   assert(bottom_bb >= 0);
   assert(right_bb < width);
   assert(top_bb < height);
+
+  // These edge equations come from the equation:
+  //
+  // p and q are points on the triangle
+  // e is the edge from p to q
+  // point x is on the line e if
+  
+  // n * (x - p) = 0
+  // n * x - n * p = 0
+  //
+  // a and b from the edge equation are the x and y components of n * x
+  // c is the n * p component
+  //
+  EdgeEquation e0 = edge_equation(p1, p2);
+  EdgeEquation e1 = edge_equation(p2, p0);
+  EdgeEquation e2 = edge_equation(p0, p1);
+
+  // Loop through the bounding box of pixels of the triangle
+  for(u32 y_pixel = bottom_bb; y_pixel <= top_bb; y_pixel++)
+  {
+    for(u32 x_pixel = left_bb; x_pixel <= right_bb; x_pixel++)
+    {
+      u32 index = y_pixel * width + x_pixel;
+
+      f32 eval0 = e0.a * x_pixel + e0.b * y_pixel + e0.c;
+      f32 eval1 = e1.a * x_pixel + e1.b * y_pixel + e1.c;
+      f32 eval2 = e2.a * x_pixel + e2.b * y_pixel + e2.c;
+
+      // Check if the point is inside the triangle by checking if edge equation evaluations are zero
+      if((eval0 > 0.0f || (eval0 == 0.0f && e0.tl == true)) &&
+         (eval1 > 0.0f || (eval1 == 0.0f && e1.tl == true)) &&
+         (eval2 > 0.0f || (eval2 == 0.0f && e2.tl == true))
+        )
+      {
+        Color color = Color(1.0f, 1.0f, 1.0f);
+
+        f32 double_triangle_area = eval0 + eval1 + eval2;
+        f32 a = eval0 / double_triangle_area;
+        f32 b = eval1 / double_triangle_area;
+        f32 c = eval2 / double_triangle_area;
+        
+        // Calculate depth value for this pixel
+        f32 depth = (a * p0.z) + (b * p1.z) + (c * p2.z);
+
+        // Make sure this pixel has a lesser depth
+        if(depth < depth_buffer[index])
+        {
+          v3 light_pos = v3(0.0f, 0.0f, 1.0f);
+          f32 intensity0 = dot(normals[0], unit(light_pos));
+          f32 intensity1 = dot(normals[1], unit(light_pos));
+          f32 intensity2 = dot(normals[2], unit(light_pos));
+
+          //f32 s = (a * textureCoords[0].x) + (b * textureCoords[1].x) + (c * textureCoords[2].x);
+          //f32 t = (a * textureCoords[0].y) + (b * textureCoords[1].y) + (c * textureCoords[2].y);
+
+          // Clamp the intensity to zero
+          // The intensity may be negative if the light source is facing away from the normal
+          if(intensity0 < 0.0f) intensity0 = 0.0f;
+          if(intensity1 < 0.0f) intensity1 = 0.0f;
+          if(intensity2 < 0.0f) intensity2 = 0.0f;
+
+          // Interpolate the intensity of this pixel using barycentric coordinates
+          f32 intensity = (a * intensity0) + (b * intensity1) + (c * intensity2);
+          intensity = clamp(intensity, 0.0f, 1.0f);
+
+#if 1
+          color.r *= squared(intensity) * 0.8f;
+          color.g *= squared(intensity) * 0.0f;
+          color.b *= squared(intensity) * 1.0f;
 #else
-  if(left_bb < 0) left_bb = 0;
-  if(bottom_bb < 0) bottom_bb = 0;
-  if(right_bb >= width - 1) right_bb = width - 1;
-  if(top_bb >= height - 1) top_bb = height - 1;
+          color.r *= a;
+          color.g *= b;
+          color.b *= c;
 #endif
+
+          // Set the pixel depth in the depth buffer
+          depth_buffer[index] = depth;
+
+          // Set the final pixel color
+          pixels[index] = color.pack();
+
+
+          renderer_data.pixel_info_buffer[index].x = x_pixel;
+          renderer_data.pixel_info_buffer[index].y = y_pixel;
+          renderer_data.pixel_info_buffer[index].final_color = color;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[0] = p0;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[1] = p1;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[2] = p2;
+        }
+      }
+    }
+  }
+}
+#else
+{
+  v3 crossp = cross(p1 - p0, p2 - p0);
+
+  // Backface culling
+  if(crossp.z < 0.0f) 
+  {
+    return;
+  }
+
+  // Normalize normals
+  if(normals)
+  {
+    for(u32 i = 0; i < 3; i++) normals[i] = unit(normals[i]);
+  }
+
+  f32 *depth_buffer = renderer_data.depth_buffer;
+
+  // Get the bounding box of pixels to check the triangle against
+  v2 bottom_left_bound = v2(min(p0.x, p1.x, p2.x), min(p0.y, p1.y, p2.y));
+  v2 top_right_bound = v2(max(p0.x, p1.x, p2.x), max(p0.y, p1.y, p2.y));
+  u32 left_bb = (u32)bottom_left_bound.x;
+  u32 bottom_bb = (u32)bottom_left_bound.y;
+  u32 right_bb = (u32)top_right_bound.x;
+  u32 top_bb = (u32)top_right_bound.y;
+
+  u32 width = renderer_data.screen_width;
+  u32 height = renderer_data.screen_height;
+
+  assert(left_bb >= 0);
+  assert(bottom_bb >= 0);
+  assert(right_bb < width);
+  assert(top_bb < height);
 
   // These edge equations come from the equation:
   //
@@ -355,9 +644,9 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
       assert(index >= 0 && index < width * height);
 
       // Check if the point is inside the triangle by checking if edge equation evaluations are zero
-      if((eval0 > 0 || (eval0 == 0 && e0.tl == true)) &&
-         (eval1 > 0 || (eval1 == 0 && e1.tl == true)) &&
-         (eval2 > 0 || (eval2 == 0 && e2.tl == true))
+      if((eval0 > 0.0f || (eval0 == 0.0f && e0.tl == true)) &&
+         (eval1 > 0.0f || (eval1 == 0.0f && e1.tl == true)) &&
+         (eval2 > 0.0f || (eval2 == 0.0f && e2.tl == true))
         )
       {
         Color color = Color(1.0f, 1.0f, 1.0f);
@@ -368,14 +657,17 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
         // Make sure this pixel has a lesser depth
         if(depth < depth_buffer[index])
         {
+#if 0
           f32 intensity0 = 1.0f;
           f32 intensity1 = 1.0f;
           f32 intensity2 = 1.0f;
+#else
           // Intensity is cos of the angle between the light source and the normal
-          //v3 light_pos = v3(0.0f, 0.0f, 1.0f);
-          //intensity0 = dot(normals[0], unit(light_pos - centroid));
-          //intensity1 = dot(normals[1], unit(light_pos - centroid));
-          //intensity2 = dot(normals[2], unit(light_pos - centroid));
+          v3 light_pos = v3(0.0f, 0.0f, 1.0f);
+          f32 intensity0 = dot(normals[0], unit(light_pos));
+          f32 intensity1 = dot(normals[1], unit(light_pos));
+          f32 intensity2 = dot(normals[2], unit(light_pos));
+#endif
 
           //f32 s = (a * textureCoords[0].x) + (b * textureCoords[1].x) + (c * textureCoords[2].x);
           //f32 t = (a * textureCoords[0].y) + (b * textureCoords[1].y) + (c * textureCoords[2].y);
@@ -390,10 +682,10 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
           f32 intensity = (a * intensity0) + (b * intensity1) + (c * intensity2);
           intensity = clamp(intensity, 0.0f, 1.0f);
 
-#if 0
-          color.r *= squared(intensity);
-          color.g *= squared(intensity);
-          color.b *= squared(intensity);
+#if 1
+          color.r *= squared(intensity) * 0.8f;
+          color.g *= squared(intensity) * 0.0f;
+          color.b *= squared(intensity) * 1.0f;
 #else
           color.r *= a;
           color.g *= b;
@@ -405,6 +697,14 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
 
           // Set the final pixel color
           pixels[index] = color.pack();
+
+
+          renderer_data.pixel_info_buffer[index].x = x_pixel;
+          renderer_data.pixel_info_buffer[index].y = y_pixel;
+          renderer_data.pixel_info_buffer[index].final_color = color;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[0] = p0;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[1] = p1;
+          renderer_data.pixel_info_buffer[index].triangle_vertices[2] = p2;
         }
       }
 
@@ -436,15 +736,16 @@ static void render_triangle(u32 *pixels, v3 p0, v3 p1, v3 p2, v3 *normals, v2 *t
     c += c_inc_y;
   }
 }
+#endif
 
-static void clip_polygon(u32 num_in_points, v4 *in_points, u32 *num_out_points, v4 *out_points, ClipPlane plane)
+static void clip_polygon(ClipPlane plane, u32 num_in_points, Vertex *in_points, u32 *num_out_points, Vertex *out_points)
 {
   v4 plane_equation;
 
-  for(s32 i = 0; i < num_in_points; i++)
+  for(u32 i = 0; i < num_in_points; i++)
   {
-    v4 first = in_points[i];
-    v4 second = in_points[(i + 1) % num_in_points];
+    Vertex first = in_points[i];
+    Vertex second = in_points[(i + 1) % num_in_points];
 
     switch(plane)
     {
@@ -479,18 +780,19 @@ static void clip_polygon(u32 num_in_points, v4 *in_points, u32 *num_out_points, 
       }
 
       case FAR_CLIP_PLANE:
-      {
-        plane_equation = v4(0.0f, 0.0f, 0.0f, -1.0f);
+      { //                                |
+        // ??? does this need to be zero? V
+        plane_equation = v4(0.0f, 0.0f, 1.0f, -1.0f);
         break;
       }
     }
 
-    f32 first_eval = dot(plane_equation, first);
-    f32 second_eval = dot(plane_equation, second);
+    f32 first_eval = dot(plane_equation, first.vertex);
+    f32 second_eval = dot(plane_equation, second.vertex);
     bool first_outside = 0;
     bool second_outside = 0;
 
-    if(first_eval > 0) first_outside = true;
+    if(first_eval > 0)  first_outside = true;
     if(second_eval > 0) second_outside = true;
 
     // Add the first point if inside
@@ -508,15 +810,20 @@ static void clip_polygon(u32 num_in_points, v4 *in_points, u32 *num_out_points, 
     f32 dist_first_to_second = first_eval - second_eval;
     f32 dist = dist_first_to_plane / dist_first_to_second;
 
-    v4 clipped_point = first + dist * (second - first);
-    clipped_point -= plane_equation * 0.001f * absf(dist_first_to_second);
+    const float EPSILON = 0.001f;
+    if(first_eval > second_eval) dist += EPSILON;
+    else                         dist -= EPSILON;
+    
+    
+    // Interpolate vertex
+    v4 clipped_point = first.vertex + dist * (second.vertex - first.vertex);
+    v3 clipped_normal = first.normal + dist * (second.normal - first.normal);
 
-    if(absf(clipped_point.x) > absf(clipped_point.w))
-    {
-      int b = 0;
-    }
+    Vertex clipped_vertex;
+    clipped_vertex.vertex = clipped_point;
+    clipped_vertex.normal = clipped_normal;
 
-    out_points[*num_out_points] = clipped_point;
+    out_points[*num_out_points] = clipped_vertex;
     (*num_out_points)++;
   }
 }
@@ -558,12 +865,15 @@ void init_renderer(u32 *frame_buffer, u32 width, u32 height)
 #if 1
   load_obj("meshes/head.obj", &renderer_data.model->vertices, 0, 0, &renderer_data.model->vertex_indices);
   normalize_mesh(&renderer_data.model->vertices);
-  compute_vertex_normals(&renderer_data.model->vertices, &renderer_data.model->vertex_indices, &renderer_data.model->normals);
 #else
   v3 p0 = {-1.0f, -1.0f, 0.0f};
   v3 p1 = { 1.0f, -1.0f, 0.0f};
   v3 p2 = { 1.0f,  1.0f, 0.0f};
   v3 p3 = {-1.0f,  1.0f, 0.0f};
+  //v3 p0 = {-1000.0f, -1000.0f, 0.0f};
+  //v3 p1 = { 1000.0f, -1000.0f, 0.0f};
+  //v3 p2 = { 1000.0f,  1000.0f, 0.0f};
+  //v3 p3 = {-1000.0f,  1000.0f, 0.0f};
   renderer_data.model->vertices.push_back(p0);
   renderer_data.model->vertices.push_back(p1);
   renderer_data.model->vertices.push_back(p2);
@@ -575,6 +885,11 @@ void init_renderer(u32 *frame_buffer, u32 width, u32 height)
   renderer_data.model->vertex_indices.push_back(3);
   renderer_data.model->vertex_indices.push_back(0);
 #endif
+  compute_vertex_normals(&renderer_data.model->vertices, &renderer_data.model->vertex_indices, &renderer_data.model->normals);
+
+  renderer_data.model->position = v3();
+  renderer_data.model->scale = v3(6, 6, 1.0f);
+  renderer_data.model->rotation = deg_to_rad(90);
 }
 
 // glDrawArrays
@@ -586,6 +901,9 @@ void render()
   clear_frame_buffer();
   // Clear depth buffer
   for(u32 i = 0; i < renderer_data.num_pixels; i++) renderer_data.depth_buffer[i] = 1.0f;
+
+  // Clear pixel info buffer
+  for(u32 i = 0; i < renderer_data.num_pixels; i++) renderer_data.pixel_info_buffer[i] = PixelInfo();
 
   renderer_data.vertex_buffer.clear();
   renderer_data.index_buffer.clear();
@@ -599,7 +917,10 @@ void render()
   const Model *model = renderer_data.model;
   for(u32 i = 0; i < model->vertices.size(); i++)
   {
-    renderer_data.vertex_buffer.push_back(v4(model->vertices[i], 1.0f));
+    Vertex v;
+    v.vertex = v4(model->vertices[i], 1.0f);
+    v.normal = model->normals[i];
+    renderer_data.vertex_buffer.push_back(v);
   }
   for(u32 i = 0; i < model->vertex_indices.size(); i++)
   {
@@ -641,12 +962,12 @@ void render()
   f32 n = renderer_data.near_plane;
   // Distance from the far plane (must be positive)
   f32 f = renderer_data.far_plane;
-  float field_of_view = deg_to_rad(renderer_data.camera_width);
+  f32 field_of_view = deg_to_rad(renderer_data.camera_width);
   f32 r = -(f + n) / (f - n);
   f32 s = -(2 * n * f) / (f - n);
   mat4 persp = 
   {
-    (float)(1.0f / tan(field_of_view / 2.0f)) / renderer_data.aspect_ratio, 0.0f, 0.0f, 0.0f,
+    (f32)(1.0f / tan(field_of_view / 2.0f)) / renderer_data.aspect_ratio, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f / tan(field_of_view / 2.0f), 0.0f, 0.0f,
     0.0f, 0.0f, r, s,
     0.0f, 0.0f, -1.0f, 0.0f
@@ -662,31 +983,34 @@ void render()
     projection = persp;
   }
   // Vertex shader (model space to clip space)
+  time_block("1: vertex transformation");
   for(u32 i = 0; i < renderer_data.vertex_buffer.size(); i++)
   {
-    v4 result = renderer_data.vertex_buffer[i];
+    v4 result = renderer_data.vertex_buffer[i].vertex;
     result = world * result;
     result = view * result;
     result = projection * result;
-    renderer_data.vertex_buffer[i] = result;
+    renderer_data.vertex_buffer[i].vertex = result;
   }
+  end_time_block();
   
   // Clipping
 #if 1
+  time_block("2: clipping");
   // For each triangle
   for(u32 triangle_index = 0; triangle_index < renderer_data.index_buffer.size(); )
   {
-    u32 p0_index = renderer_data.index_buffer[triangle_index++];
-    u32 p1_index = renderer_data.index_buffer[triangle_index++];
-    u32 p2_index = renderer_data.index_buffer[triangle_index++];
+    // The three original triangle point indices
+    u32 point_indices[3];
+    point_indices[0] = renderer_data.index_buffer[triangle_index++];
+    point_indices[1] = renderer_data.index_buffer[triangle_index++];
+    point_indices[2] = renderer_data.index_buffer[triangle_index++];
 
     // The three original triangle points
-    v4 points[3] =
-    {
-      renderer_data.vertex_buffer[p0_index],
-      renderer_data.vertex_buffer[p1_index],
-      renderer_data.vertex_buffer[p2_index],
-    };
+    Vertex points[3];
+    points[0] = renderer_data.vertex_buffer[point_indices[0]];
+    points[1] = renderer_data.vertex_buffer[point_indices[1]];
+    points[2] = renderer_data.vertex_buffer[point_indices[2]];
 
 #if 0
     u8 point_grid_positions[3];
@@ -707,10 +1031,12 @@ void render()
     }
 #endif
 
-    v4 a_points[6] = {};
+    // Make two buffers for added clipped points
+    // One buffer defines the polygon, the other stores the clipped result
+    Vertex a_points[6] = {};
     u32 num_a_points = 0;
 
-    v4 b_points[6] = {};
+    Vertex b_points[6] = {};
     u32 num_b_points = 0;
 
     // Clip against each plane
@@ -720,33 +1046,37 @@ void render()
     num_a_points = 3;
 
 
-    clip_polygon(num_a_points, a_points, &num_b_points, b_points, LEFT_CLIP_PLANE);
+    clip_polygon(LEFT_CLIP_PLANE, num_a_points, a_points, &num_b_points, b_points);
 
     num_a_points = 0;
-    clip_polygon(num_b_points, b_points, &num_a_points, a_points, RIGHT_CLIP_PLANE);
+    clip_polygon(RIGHT_CLIP_PLANE, num_b_points, b_points, &num_a_points, a_points);
 
     num_b_points = 0;
-    clip_polygon(num_a_points, a_points, &num_b_points, b_points, BOTTOM_CLIP_PLANE);
+    clip_polygon(BOTTOM_CLIP_PLANE, num_a_points, a_points, &num_b_points, b_points);
 
     num_a_points = 0;
-    clip_polygon(num_b_points, b_points, &num_a_points, a_points, TOP_CLIP_PLANE);
+    clip_polygon(TOP_CLIP_PLANE, num_b_points, b_points, &num_a_points, a_points);
 
     num_b_points = 0;
-    clip_polygon(num_a_points, a_points, &num_b_points, b_points, NEAR_CLIP_PLANE);
+    clip_polygon(NEAR_CLIP_PLANE, num_a_points, a_points, &num_b_points, b_points);
 
     num_a_points = 0;
-    clip_polygon(num_b_points, b_points, &num_a_points, a_points, FAR_CLIP_PLANE);
+    clip_polygon(FAR_CLIP_PLANE, num_b_points, b_points, &num_a_points, a_points);
 
 
 
+    // TODO: This will add redundant vertices and not optimize using indices
+    //       For each index, there will be a vertex with it
+    //
+    //       Reuse vertices that are already in the clipped buffer
     if(num_a_points)
     {
-      for(s32 i = 0; i < num_a_points; i++)
+      for(u32 i = 0; i < num_a_points; i++)
       {
         renderer_data.clipped_vertex_buffer.push_back(a_points[i]);
       }
       u32 start_index = renderer_data.clipped_vertex_buffer.size() - num_a_points;
-      for(s32 i = 1; i < num_a_points - 1; i++)
+      for(u32 i = 1; i < num_a_points - 1; i++)
       {
         renderer_data.clipped_index_buffer.push_back(start_index);
         renderer_data.clipped_index_buffer.push_back(start_index + i);
@@ -754,7 +1084,8 @@ void render()
       }
     }
   }
-#else
+  end_time_block();
+#else // Clipping
   for(u32 i = 0; i < renderer_data.vertex_buffer.size(); i++)
   {
     renderer_data.clipped_vertex_buffer.push_back(renderer_data.vertex_buffer[i]);
@@ -764,42 +1095,40 @@ void render()
     renderer_data.clipped_index_buffer.push_back(renderer_data.index_buffer[i]);
   }
 
-#endif
+#endif // Clipping
 
 
   // Perspective division (clip space to ndc space)
+  time_block("3: perspective division");
   for(u32 i = 0; i < renderer_data.clipped_vertex_buffer.size(); i++)
   {
-    renderer_data.clipped_vertex_buffer[i] /= renderer_data.clipped_vertex_buffer[i].w; 
+    renderer_data.clipped_vertex_buffer[i].vertex /= renderer_data.clipped_vertex_buffer[i].vertex.w; 
   }
+  end_time_block();
 
   // Viewport transform (ndc space to viewport space)
   // Transform the vertex buffer
+  time_block("4: viewport transform");
   for(u32 i = 0; i < renderer_data.clipped_vertex_buffer.size(); i++)
   {
     // Map the ndc to the screen coordinates
-    v4 ndc = renderer_data.clipped_vertex_buffer[i];
-#if 1
+    v4 ndc = renderer_data.clipped_vertex_buffer[i].vertex;
+
     if(ndc.x < -1.0f || ndc.x > 1.0f)
     {
-      printf("ndc.x = %f, x should be between -1 and 1\n", ndc.x);
+      log_file("ndc.x = %f, x should be between -1 and 1\n", ndc.x);
       assert(0);
     }
     if(ndc.y < -1.0f || ndc.y > 1.0f)
     {
-      printf("ndc.y = %f, y should be between -1 and 1\n", ndc.y);
+      log_file("ndc.y = %f, y should be between -1 and 1\n", ndc.y);
       assert(0);
     }
     if(ndc.z < -1.0f || ndc.z > 1.0f)
     {
-      printf("ndc.z = %f, z should be between -1 and 1\n", ndc.z);
+      log_file("ndc.z = %f, z should be between -1 and 1\n", ndc.z);
       assert(0);
     }
-#else
-    ndc.x = clamp(ndc.x, -1.0f, 1.0f);
-    ndc.y = clamp(ndc.y, -1.0f, 1.0f);
-    ndc.z = clamp(ndc.z, -1.0f, 1.0f);
-#endif
 
 
     ndc += v4(1.0f, 1.0f, 0.0f, 0.0f);
@@ -810,9 +1139,17 @@ void render()
     screen_pos.z = (ndc.z + 1.0f) / 2.0f;
     screen_pos.w = ndc.w;
 
+#if 0
+    if(screen_pos.x < 0) screen_pos.x += 0.5f;
+    if(screen_pos.x >= screen_width) screen_pos.x -= 0.5f;
+    if(screen_pos.y < 0) screen_pos.y += 0.5f;
+    if(screen_pos.y >= screen_height) screen_pos.y -= 0.5f;
+#endif
 
-    renderer_data.clipped_vertex_buffer[i] = screen_pos;
+
+    renderer_data.clipped_vertex_buffer[i].vertex = screen_pos;
   }
+  end_time_block();
 
 
 
@@ -822,33 +1159,48 @@ void render()
   u32 *pixels = renderer_data.frame_buffer;
 
 
-  const std::vector<v4> &vertices = renderer_data.clipped_vertex_buffer;
+  const std::vector<Vertex> &vertices = renderer_data.clipped_vertex_buffer;
   const std::vector<u32> &indices = renderer_data.clipped_index_buffer;
+
+  time_block("5: draw all triangles");
   for(u32 i = 0; i < indices.size(); )
   {
     v3 v[3];
-    //v3 n[3];
+    v3 n[3];
 
     u32 index = indices[i++];
-    v3 vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
+    v3 vertex = v3(vertices[index].vertex.x, vertices[index].vertex.y, vertices[index].vertex.z);
     v[0] = vertex;
-    //n[0] = renderer_data.model->normals[index];
+    n[0] = vertices[index].normal;
 
     index = indices[i++];
-    vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
+    vertex = v3(vertices[index].vertex.x, vertices[index].vertex.y, vertices[index].vertex.z);
     v[1] = vertex;
-    //n[1] = renderer_data.model->normals[index];
+    n[1] = vertices[index].normal;
 
     index = indices[i++];
-    vertex = v3(vertices[index].x, vertices[index].y, vertices[index].z);
+    vertex = v3(vertices[index].vertex.x, vertices[index].vertex.y, vertices[index].vertex.z);
     v[2] = vertex;
-    //n[2] = renderer_data.model->normals[index];
+    n[2] = vertices[index].normal;
 
 
 
-    render_triangle(pixels, v[0], v[1], v[2], 0, 0, v3());
+
+    if(renderer_data.mode == RENDER_MODE_TRIANGLES)
+    {
+      time_block("6: rasterize triangle");
+      render_triangle(pixels, v[0], v[1], v[2], n, 0);
+      end_time_block();
+    }
+    else
+    {
+      render_line_bresenham((u32)v[0].x, (u32)v[0].y, (u32)v[1].x, (u32)v[1].y, Color(0.0f, 0.0f, 1.0f));
+      render_line_bresenham((u32)v[1].x, (u32)v[1].y, (u32)v[2].x, (u32)v[2].y, Color(0.0f, 0.0f, 1.0f));
+      render_line_bresenham((u32)v[2].x, (u32)v[2].y, (u32)v[0].x, (u32)v[0].y, Color(0.0f, 0.0f, 1.0f));
+    }
+
   }
-
+  end_time_block();
 
   update_stuff();
 }

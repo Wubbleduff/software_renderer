@@ -12,11 +12,18 @@ Points I'm learning:
   understanding of clipping.
 
 - After reading, the problem of clipping became extremely simple once I broke
-  it down into mah simple problems to solve. Rather than trying to deal with
+  it down into simpler problems to solve. Rather than trying to deal with
   corner cases in clipping, it was simpler to independently clip against 6
   planes for each triangle.
 
-- Swtiched from using OpenGL to Windows for access to a frame buffer.
+- Switched from using OpenGL to Windows for access to a frame buffer.
+
+- Software rasterizer lets me inspect data about everything in the graphics pipeline. I
+  can click on pixels and display why they aren't showing.
+
+- I fixed a bug where there were pixels not being filled inside of triangles.
+  This was due to an accumulation of floating point errors while trying to
+  fill in the triangles incrementally.
 
 
 5/24/2019

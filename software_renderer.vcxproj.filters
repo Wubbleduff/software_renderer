@@ -24,6 +24,12 @@
     <ClCompile Include="source\asset_loading.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="source\logging.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\profiling.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="source\software_renderer.h">
@@ -33,6 +39,15 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="source\asset_loading.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\types.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\logging.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\profiling.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

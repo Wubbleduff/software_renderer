@@ -1,7 +1,13 @@
 #include "software_renderer.h"
 #include "types.h"
+#include "my_math.h" // v2
+#include "logging.h"
+#include "profiling.h"
 
 #include <windows.h>
+#include <time.h> // clock
+
+#include <stdio.h> // file io for printing time
 
 static HWND window_handle = 0;
 static HDC DIB_handle;
@@ -13,13 +19,36 @@ static u32 *frame_buffer;
 static bool running;
 
 #define MAX_BUTTONS 165
-static bool button_states[MAX_BUTTONS] = {};
+static bool key_states[MAX_BUTTONS] = {};
+static bool mouse_states[8] = {};
 
 
-bool button_state(u32 button)
+bool key_state(u32 button)
 {
-  return button_states[button];
+  if(button < 0 || button > MAX_BUTTONS) return false;
+
+  return key_states[button];
 }
+
+bool mouse_state(u32 button)
+{
+  if(button < 0 || button > 8) return false;
+
+  return mouse_states[button];
+}
+
+v2 mouse_window_position()
+{
+  POINT p;
+  if(GetCursorPos(&p))
+  {
+    ScreenToClient(window_handle, &p);
+    return v2((float)p.x, (float)p.y);
+  }
+
+  return v2();
+}
+
 
 
 
@@ -55,19 +84,31 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     {
       ValidateRect(window_handle, 0);
     }
+    break;
 
     case WM_KEYDOWN: 
     {
-      button_states[wParam] = true;
-      break;
+      key_states[wParam] = true;
     }
     break;
 
     case WM_KEYUP:
     {
-      button_states[wParam] = false;
-      break;
+      key_states[wParam] = false;
     }
+    break;
+
+    case WM_LBUTTONDOWN:
+    {
+      mouse_states[0] = true;
+    }
+    break;
+
+    case WM_LBUTTONUP:
+    {
+      mouse_states[0] = false;
+    }
+    break;
     
     default:
     {
@@ -96,23 +137,18 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     return 1;
   }
 
-  POINT ptZero = { 0 };
-  HMONITOR hmonPrimary = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
-  MONITORINFO monitorinfo = { 0 };
-  const RECT &rcWork = monitorinfo.rcWork;
-  monitorinfo.cbSize = sizeof(monitorinfo);
-  GetMonitorInfo(hmonPrimary, &monitorinfo);
-  LONG monitor_width = rcWork.right - rcWork.left;
-  LONG monitor_height = rcWork.bottom - rcWork.top;
+  
+  u32 monitor_width = GetSystemMetrics(SM_CXSCREEN);
+  u32 monitor_height = GetSystemMetrics(SM_CYSCREEN);
 
-#define TRANSPARENT_WINDOW
+#define TRANSPARENT_WINDOWx
 
   // Create the window
 #ifdef TRANSPARENT_WINDOW
   window_handle = CreateWindowEx(WS_EX_LAYERED | WS_EX_TOPMOST,    // Extended style
                                 window_class.lpszClassName,        // Class name
                                 "Software Renderer",               // Window name
-                                WS_OVERLAPPEDWINDOW | WS_VISIBLE,  // Style of the window
+                                WS_POPUP | WS_VISIBLE,             // Style of the window
                                 0,                                 // Initial X position
                                 0,                                 // Initial Y position
                                 monitor_width,                     // Initial width
@@ -168,9 +204,14 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
   init_renderer(frame_buffer, DIB_width, DIB_height);
 
+  init_logging();
+
   // Main loop
   while(running)
   {
+    time_block("0: main loop");
+    float start_frame_time = (float)clock();
+
     MSG message;
     while(PeekMessage(&message, 0, 0, 0, PM_REMOVE))
     {
@@ -182,7 +223,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
       DispatchMessage(&message);
     }
 
-    if(button_states[VK_ESCAPE])
+    if(key_states[VK_ESCAPE])
     {
       PostQuitMessage(0);
       running = false;
@@ -196,7 +237,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 #ifdef TRANSPARENT_WINDOW
     SIZE sizeSplash = { DIB_width, DIB_height };
 
-
+    POINT ptZero = { 0 };
     POINT ptOrigin;
     ptOrigin.x = (monitor_width / 2) - (client_rect.right / 2);
     ptOrigin.y = (monitor_height / 2) - (client_rect.bottom / 2);
@@ -209,12 +250,16 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     bool result = UpdateLayeredWindow(window_handle, hdc, &ptOrigin, &sizeSplash,
                                       DIB_handle, &ptZero, RGB(0, 0, 0), &blend, ULW_ALPHA);
 #else
-    BitBlt(hdc, 0, 0, DIB_width, DIB_height, DIB_handle, 0, 0, SRCCOPY );
+    BitBlt(hdc, 0, 0, DIB_width, DIB_height, DIB_handle, 0, 0, SRCCOPY);
 #endif
 
 
     ReleaseDC(window_handle, hdc);
+
+    end_time_block();
   }
+
+  dump_profile_info();
 
   return 0;
 }
