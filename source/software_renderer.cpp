@@ -2,7 +2,7 @@
 #include "my_math.h"
 #include "asset_loading.h"
 #include "input.h"
-#include "profiling.h"
+//#include "profiling.h"
 
 #include "logging.h"
 
@@ -983,7 +983,7 @@ void render()
     projection = persp;
   }
   // Vertex shader (model space to clip space)
-  time_block("1: vertex transformation");
+  //time_block("1: vertex transformation");
   for(u32 i = 0; i < renderer_data.vertex_buffer.size(); i++)
   {
     v4 result = renderer_data.vertex_buffer[i].vertex;
@@ -992,11 +992,11 @@ void render()
     result = projection * result;
     renderer_data.vertex_buffer[i].vertex = result;
   }
-  end_time_block();
+  //end_time_block();
   
   // Clipping
 #if 1
-  time_block("2: clipping");
+  //time_block("2: clipping");
   // For each triangle
   for(u32 triangle_index = 0; triangle_index < renderer_data.index_buffer.size(); )
   {
@@ -1084,7 +1084,7 @@ void render()
       }
     }
   }
-  end_time_block();
+  //end_time_block();
 #else // Clipping
   for(u32 i = 0; i < renderer_data.vertex_buffer.size(); i++)
   {
@@ -1099,16 +1099,16 @@ void render()
 
 
   // Perspective division (clip space to ndc space)
-  time_block("3: perspective division");
+  //time_block("3: perspective division");
   for(u32 i = 0; i < renderer_data.clipped_vertex_buffer.size(); i++)
   {
     renderer_data.clipped_vertex_buffer[i].vertex /= renderer_data.clipped_vertex_buffer[i].vertex.w; 
   }
-  end_time_block();
+  //end_time_block();
 
   // Viewport transform (ndc space to viewport space)
   // Transform the vertex buffer
-  time_block("4: viewport transform");
+  //time_block("4: viewport transform");
   for(u32 i = 0; i < renderer_data.clipped_vertex_buffer.size(); i++)
   {
     // Map the ndc to the screen coordinates
@@ -1149,7 +1149,7 @@ void render()
 
     renderer_data.clipped_vertex_buffer[i].vertex = screen_pos;
   }
-  end_time_block();
+  //end_time_block();
 
 
 
@@ -1162,7 +1162,7 @@ void render()
   const std::vector<Vertex> &vertices = renderer_data.clipped_vertex_buffer;
   const std::vector<u32> &indices = renderer_data.clipped_index_buffer;
 
-  time_block("5: draw all triangles");
+  //time_block("5: draw all triangles");
   for(u32 i = 0; i < indices.size(); )
   {
     v3 v[3];
@@ -1188,9 +1188,9 @@ void render()
 
     if(renderer_data.mode == RENDER_MODE_TRIANGLES)
     {
-      time_block("6: rasterize triangle");
+      //time_block("6: rasterize triangle");
       render_triangle(pixels, v[0], v[1], v[2], n, 0);
-      end_time_block();
+      ////end_time_block();
     }
     else
     {
@@ -1200,7 +1200,7 @@ void render()
     }
 
   }
-  end_time_block();
+  //end_time_block();
 
   update_stuff();
 }

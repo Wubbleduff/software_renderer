@@ -2,7 +2,7 @@
 #include "types.h"
 #include "my_math.h" // v2
 #include "logging.h"
-#include "profiling.h"
+//#include "profiling.h"
 
 #include <windows.h>
 #include <time.h> // clock
@@ -209,7 +209,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
   // Main loop
   while(running)
   {
-    time_block("0: main loop");
+    //time_block("0: main loop");
     float start_frame_time = (float)clock();
 
     MSG message;
@@ -256,10 +256,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     ReleaseDC(window_handle, hdc);
 
-    end_time_block();
+    //end_time_block();
   }
 
-  dump_profile_info();
+  //dump_profile_info();
 
   return 0;
 }
